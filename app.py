@@ -335,10 +335,10 @@ if camera_image is not None:
                     [st.session_state.attendance_log, new_entry], ignore_index=True
                 )
 
-            # Persist state for after rerun
+            # Convert numpy frame to PIL Image before storing — avoids st.image TypeError on rerun
             st.session_state.last_img_hash = img_hash
             st.session_state.last_result   = "granted" if is_masked else "denied"
-            st.session_state.last_frame    = frame
+            st.session_state.last_frame    = Image.fromarray(frame)
 
             st.rerun()
 
