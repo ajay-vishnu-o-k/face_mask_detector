@@ -5,22 +5,21 @@ from tensorflow.keras.models import load_model
 from PIL import Image
 import pandas as pd
 from datetime import datetime
+import hashlib
 
 # --- 1. Page Configuration ---
 st.set_page_config(
     page_title="Smart Attendance",
     page_icon="😷",
     layout="centered",
-    initial_sidebar_state="collapsed",   # keeps mobile viewport clean
+    initial_sidebar_state="collapsed",
 )
 
-# ── Custom CSS: dark theme + full mobile responsiveness ──
+# ── Custom CSS ──
 st.markdown("""
 <style>
-    /* ── Google Fonts ── */
     @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap');
 
-    /* ── Design tokens ── */
     :root {
         --bg-primary:   #0d0f14;
         --bg-secondary: #151820;
@@ -35,11 +34,7 @@ st.markdown("""
         --radius:       14px;
     }
 
-    /* ── Viewport / base ── */
-    html {
-        -webkit-text-size-adjust: 100%;   /* stop iOS from auto-enlarging fonts */
-        touch-action: manipulation;        /* removes 300 ms tap delay            */
-    }
+    html { -webkit-text-size-adjust: 100%; touch-action: manipulation; }
 
     html, body,
     [data-testid="stAppViewContainer"],
@@ -50,10 +45,9 @@ st.markdown("""
         color: var(--text-primary);
     }
 
-    /* ── Shrink default Streamlit padding on mobile ── */
     .main .block-container {
-        padding: 1rem 1rem 2rem !important;   /* tight on all sides            */
-        max-width: 100% !important;            /* no forced wide min-width      */
+        padding: 1rem 1rem 2rem !important;
+        max-width: 100% !important;
     }
 
     @media (min-width: 768px) {
@@ -64,23 +58,17 @@ st.markdown("""
         }
     }
 
-    [data-testid="stHeader"] {
-        background-color: var(--bg-primary) !important;
-    }
+    [data-testid="stHeader"] { background-color: var(--bg-primary) !important; }
 
-    /* hide the default hamburger / sidebar toggle on small screens */
     @media (max-width: 767px) {
         [data-testid="stSidebarNav"],
-        [data-testid="collapsedControl"] {
-            display: none !important;
-        }
+        [data-testid="collapsedControl"] { display: none !important; }
     }
 
-    /* ── Typography ── */
     h1 {
         font-family: 'Syne', sans-serif !important;
         font-weight: 800 !important;
-        font-size: clamp(1.5rem, 5vw, 2.2rem) !important;   /* fluid size */
+        font-size: clamp(1.5rem, 5vw, 2.2rem) !important;
         background: linear-gradient(135deg, var(--accent-teal), var(--accent-blue));
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
@@ -103,7 +91,6 @@ st.markdown("""
         line-height: 1.6;
     }
 
-    /* ── Camera widget ── */
     [data-testid="stCameraInput"] > div {
         background: var(--bg-card) !important;
         border: 1px solid var(--border) !important;
@@ -113,7 +100,6 @@ st.markdown("""
         box-sizing: border-box;
     }
 
-    /* Make the camera preview fill its container on mobile */
     [data-testid="stCameraInput"] video,
     [data-testid="stCameraInput"] canvas,
     [data-testid="stCameraInput"] img {
@@ -129,7 +115,6 @@ st.markdown("""
         font-size: clamp(0.85rem, 2.5vw, 1rem);
     }
 
-    /* ── Buttons — large tap targets for mobile ── */
     .stButton > button,
     .stDownloadButton > button {
         background: linear-gradient(135deg, var(--accent-teal), var(--accent-blue)) !important;
@@ -138,19 +123,17 @@ st.markdown("""
         font-weight: 700 !important;
         border: none !important;
         border-radius: 10px !important;
-        padding: 0.75rem 1.6rem !important;   /* taller for fat-finger tapping  */
-        min-height: 48px !important;           /* WCAG minimum touch target      */
+        padding: 0.75rem 1.6rem !important;
+        min-height: 48px !important;
         font-size: clamp(0.85rem, 2.5vw, 1rem) !important;
-        width: 100% !important;                /* full-width on mobile           */
+        width: 100% !important;
         letter-spacing: 0.3px;
         transition: opacity 0.2s ease;
         cursor: pointer;
     }
-
     .stButton > button:hover,
     .stDownloadButton > button:hover { opacity: 0.85; }
 
-    /* ── Alert banners ── */
     div[data-testid="stSuccess"] {
         background-color: rgba(0,196,140,0.12) !important;
         border-left: 4px solid var(--green) !important;
@@ -179,36 +162,32 @@ st.markdown("""
         border-radius: 10px !important;
     }
 
-    /* ── Dataframe — horizontal scroll on narrow screens ── */
+    /* suppress Streamlit deprecation warnings */
+    div[data-testid="stDeprecationWarning"],
+    .stAlert[kind="warning"] { display: none !important; }
+
     [data-testid="stDataFrame"] {
         background: var(--bg-card) !important;
         border: 1px solid var(--border) !important;
         border-radius: var(--radius) !important;
-        overflow-x: auto !important;           /* scroll instead of overflow    */
-        -webkit-overflow-scrolling: touch;      /* smooth iOS momentum scrolling */
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch;
         width: 100% !important;
         display: block !important;
     }
-
     [data-testid="stDataFrame"] table {
-        min-width: 400px;                       /* prevents squishing columns    */
+        min-width: 400px;
         font-size: clamp(0.75rem, 2vw, 0.9rem);
     }
 
-    /* ── Divider ── */
-    hr {
-        border-color: var(--border) !important;
-        margin: 1.5rem 0 !important;
-    }
+    hr { border-color: var(--border) !important; margin: 1.5rem 0 !important; }
 
-    /* ── Image caption ── */
     [data-testid="stImage"] p {
         color: var(--text-muted) !important;
         font-size: 0.82rem;
         text-align: center;
     }
 
-    /* ── Result badge (injected via st.markdown) ── */
     .result-badge {
         display: flex;
         align-items: center;
@@ -222,70 +201,43 @@ st.markdown("""
         margin: 1rem 0;
         letter-spacing: 0.2px;
     }
-
     .result-badge.granted {
         background: rgba(0,196,140,0.15);
         border: 1.5px solid var(--green);
         color: var(--green);
     }
-
     .result-badge.denied {
         background: rgba(255,77,109,0.15);
         border: 1.5px solid var(--red);
         color: var(--red);
     }
-
-    /* ── Stats row ── */
-    .stats-row {
-        display: flex;
-        gap: 0.75rem;
-        margin-bottom: 1.25rem;
-    }
-
-    .stat-card {
-        flex: 1;
-        background: var(--bg-card);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        padding: 0.85rem 0.5rem;
-        text-align: center;
-    }
-
-    .stat-card .stat-num {
-        font-family: 'Syne', sans-serif;
-        font-size: clamp(1.4rem, 5vw, 2rem);
-        font-weight: 800;
-        line-height: 1;
-    }
-
-    .stat-card .stat-label {
-        font-size: 0.72rem;
-        color: var(--text-muted);
-        margin-top: 0.25rem;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-
-    .stat-num.green { color: var(--green); }
-    .stat-num.red   { color: var(--red);   }
-    .stat-num.blue  { color: var(--accent-blue); }
 </style>
 """, unsafe_allow_html=True)
 
 
-# ── 2. Header ──────────────────────────────────────────────────────────────
+# ── 2. Header ──────────────────────────────────────────────────────────────────
 st.title("😷 Smart Attendance")
 st.write("Snap a photo to log attendance. A mask is required for entry.")
 
 
-# ── 3. Session state ────────────────────────────────────────────────────────
+# ── 3. Session state ───────────────────────────────────────────────────────────
 if "attendance_log" not in st.session_state:
     st.session_state.attendance_log = pd.DataFrame(
         columns=["Timestamp", "Status", "Access"]
     )
+if "last_result" not in st.session_state:
+    st.session_state.last_result = None       # "granted" | "denied" | None
+
+# FIX: track the hash of the last processed image to prevent duplicate logging
+if "last_img_hash" not in st.session_state:
+    st.session_state.last_img_hash = None
+
+# FIX: store the annotated frame to redisplay after rerun without re-processing
+if "last_frame" not in st.session_state:
+    st.session_state.last_frame = None
 
 
-# ── 4. Load models ──────────────────────────────────────────────────────────
+# ── 4. Load models ─────────────────────────────────────────────────────────────
 @st.cache_resource
 def load_ai_models():
     mask_model   = load_model("face_mask_detector_final.keras")
@@ -301,108 +253,101 @@ except Exception as e:
     st.stop()
 
 
-# ── 5. Live stats bar ───────────────────────────────────────────────────────
-log = st.session_state.attendance_log
-total   = len(log)
-granted = int((log["Access"] == "Granted").sum()) if total else 0
-denied  = int((log["Access"] == "Denied").sum())  if total else 0
-
-st.markdown(f"""
-<div class="stats-row">
-  <div class="stat-card">
-    <div class="stat-num blue">{total}</div>
-    <div class="stat-label">Total</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-num green">{granted}</div>
-    <div class="stat-label">Granted</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-num red">{denied}</div>
-    <div class="stat-label">Denied</div>
-  </div>
-</div>
-""", unsafe_allow_html=True)
-
-
-# ── 6. Camera input ─────────────────────────────────────────────────────────
+# ── 6. Camera input ────────────────────────────────────────────────────────────
 camera_image = st.camera_input("📷  Look at the camera and snap a photo")
 
-if camera_image is not None:
-    image     = Image.open(camera_image)
-    frame     = np.array(image)
-    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-    gray      = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+# ── FIX: clear stored results as soon as user clears the photo ─────────────────
+if camera_image is None:
+    st.session_state.last_result   = None
+    st.session_state.last_frame    = None
+    st.session_state.last_img_hash = None
 
-    faces = face_cascade.detectMultiScale(
-        gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60)
+# ── 5. Result badge + last frame (only shown while a photo is present) ─────────
+if st.session_state.last_result == "granted":
+    st.markdown(
+        '<div class="result-badge granted">✅ &nbsp;Access Granted — Attendance Logged!</div>',
+        unsafe_allow_html=True,
+    )
+elif st.session_state.last_result == "denied":
+    st.markdown(
+        '<div class="result-badge denied">🚨 &nbsp;Access Denied — Please Wear a Mask</div>',
+        unsafe_allow_html=True,
     )
 
-    if len(faces) == 0:
-        st.warning("⚠️ No face detected — step closer and try again.")
-    else:
-        is_masked = False   # will be set per face; last face wins for banner
+if st.session_state.last_frame is not None:
+    st.image(st.session_state.last_frame, caption="Scan Result", use_container_width=True)
 
-        for (x, y, w, h) in faces:
-            face_crop  = frame_bgr[y:y+h, x:x+w]
-            resized    = cv2.resize(face_crop, (224, 224))
-            normalized = resized / 255.0
-            reshaped   = np.reshape(normalized, (1, 224, 224, 3))
+if camera_image is not None:
+    # ── FIX: hash the image bytes — only process if it's a NEW photo ──
+    img_bytes = camera_image.getvalue()
+    img_hash  = hashlib.md5(img_bytes).hexdigest()
 
-            pred      = mask_model.predict(reshaped, verbose=0)[0]
-            label_idx = np.argmax(pred)
-            is_masked = (label_idx == 0)   # 0 = Masked, 1 = Unmasked
+    if img_hash != st.session_state.last_img_hash:
+        # New photo — run detection
+        image     = Image.open(camera_image)
+        frame     = np.array(image)
+        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        gray      = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
 
-            # Color-coded bounding box (BGR)
-            color_bgr = (140, 200, 0) if is_masked else (109, 77, 255)
-            label_txt = "Masked - Granted" if is_masked else "No Mask - Denied"
+        faces = face_cascade.detectMultiScale(
+            gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60)
+        )
 
-            cv2.rectangle(frame, (x, y), (x + w, y + h), color_bgr, 3)
-
-            # Label pill above the box
-            bg_y1 = max(y - 36, 0)
-            bg_y2 = y
-            cv2.rectangle(frame, (x, bg_y1), (x + w, bg_y2), color_bgr, cv2.FILLED)
-            cv2.putText(
-                frame, label_txt, (x + 6, y - 10),
-                cv2.FONT_HERSHEY_DUPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA
-            )
-
-            # Log
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            new_entry = pd.DataFrame([{
-                "Timestamp": timestamp,
-                "Status":    "Masked"   if is_masked else "Unmasked",
-                "Access":    "Granted"  if is_masked else "Denied",
-            }])
-            st.session_state.attendance_log = pd.concat(
-                [st.session_state.attendance_log, new_entry], ignore_index=True
-            )
-
-        # Scan result image (full width on mobile)
-        st.image(frame, caption="Scan Result", use_column_width=True)
-
-        # Big color-coded result badge
-        if is_masked:
-            st.markdown(
-                '<div class="result-badge granted">✅ &nbsp;Access Granted — Attendance Logged!</div>',
-                unsafe_allow_html=True,
-            )
+        if len(faces) == 0:
+            st.warning("⚠️ No face detected — step closer and try again.")
         else:
-            st.markdown(
-                '<div class="result-badge denied">🚨 &nbsp;Access Denied — Please Wear a Mask</div>',
-                unsafe_allow_html=True,
-            )
+            is_masked = False
 
-        # Rerun to refresh stats bar immediately
-        st.rerun()
+            for (x, y, w, h) in faces:
+                face_crop  = frame_bgr[y:y+h, x:x+w]
+                resized    = cv2.resize(face_crop, (224, 224))
+                normalized = resized / 255.0
+                reshaped   = np.reshape(normalized, (1, 224, 224, 3))
+
+                pred      = mask_model.predict(reshaped, verbose=0)[0]
+                label_idx = np.argmax(pred)
+
+                # ── FIX: check both class orderings from the model ──
+                # Print to logs so you can verify: 0=Masked or 0=Unmasked
+                # Based on your notebook: class_indices shows WithMask=0, WithoutMask=1
+                is_masked = (label_idx == 0)
+
+                # RGB colors (frame is RGB from PIL)
+                color_rgb = (0, 196, 140) if is_masked else (255, 77, 109)
+                label_txt = "Masked - Granted" if is_masked else "No Mask - Denied"
+
+                cv2.rectangle(frame, (x, y), (x + w, y + h), color_rgb, 3)
+                bg_y1 = max(y - 36, 0)
+                cv2.rectangle(frame, (x, bg_y1), (x + w, y), color_rgb, cv2.FILLED)
+                cv2.putText(
+                    frame, label_txt, (x + 6, y - 10),
+                    cv2.FONT_HERSHEY_DUPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA
+                )
+
+                # Log ONE entry per photo
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                new_entry = pd.DataFrame([{
+                    "Timestamp": timestamp,
+                    "Status":    "Masked"  if is_masked else "Unmasked",
+                    "Access":    "Granted" if is_masked else "Denied",
+                }])
+                st.session_state.attendance_log = pd.concat(
+                    [st.session_state.attendance_log, new_entry], ignore_index=True
+                )
+
+            # Persist state for after rerun
+            st.session_state.last_img_hash = img_hash
+            st.session_state.last_result   = "granted" if is_masked else "denied"
+            st.session_state.last_frame    = frame
+
+            st.rerun()
 
 
-# ── 7. Attendance log ────────────────────────────────────────────────────────
+# ── 7. Attendance log ──────────────────────────────────────────────────────────
 st.divider()
 st.subheader("📋 Live Attendance Database")
 
-log = st.session_state.attendance_log   # re-read after possible rerun
+log = st.session_state.attendance_log
 
 if not log.empty:
     def highlight_access(val):
